@@ -12,6 +12,9 @@
 <!-- the approved write-ups, if they have been exported yet. A script tag rather
      than a fetch, because both copies of the paper are opened off the disk. -->
 <script src="gazette-approvals.js" onerror="void 0"></script>
+<!-- the war room's projected standings, if they have been exported. The paper
+     prints these rather than running a projection of its own. -->
+<script src="gazette-standings.js" onerror="void 0"></script>
 <style>
   :root {
     --paper:#F5F1E7; --paper-deep:#EBE5D6; --ink:#2B3037; --ink-deep:#16191D;
@@ -1873,58 +1876,70 @@ function weekView(){
    a tab called the season race should hold and the league had never been
    shown: where this is all going. */
 function seasonView(){
-  var S = simSeason();
-  if (!S || !S.rows || !S.rows.length)
-    return '<p class="empty">Not enough of the season has been played to project it yet.</p>';
-  var rows = S.rows.slice().sort(function(a, b){
-    return (b.w - a.w) || (b.pf - a.pf);
-  });
+  var S = (typeof window !== "undefined" && window.GZ_STANDINGS) || null;
+  if (!S || !S.rows || !S.rows.length){
+    return '<p class="s">The projected table has not been filed for this week yet.</p>'
+      + '<p class="note">This tab prints the war room\'s season projection rather than running one of '
+      + 'its own. That is deliberate: two models answering the same question is two answers, and the '
+      + 'week they disagree is the week both stop being worth reading. It appears here once the '
+      + 'standings have been exported and published.</p>';
+  }
+  var rows = S.rows;
   var pc = function(v){
+    if (v == null) return '<span class="tm">&middot;</span>';
     if (v >= 0.995) return "<b>&gt;99%</b>";
     if (v > 0 && v < 0.005) return '<span class="tm">&lt;1%</span>';
     return Math.round(v*100)+"%";
   };
-  var top = rows.slice().sort(function(a,b){ return b.ch - a.ch; })[0];
-  var fav = rows.slice().sort(function(a,b){ return b.po - a.po; });
-  var bubble = fav.filter(function(r){ return r.po > 0.3 && r.po < 0.7; });
+  var top = rows.slice().sort(function(a,b){ return (b.ch||0) - (a.ch||0); })[0];
+  var bubble = rows.filter(function(r){ return r.po > 0.3 && r.po < 0.7; });
+  var stale = S.week != null && S.week < MAXW;
 
-  var h = '<div class="potw"><div class="k">Most likely champion &middot; through week '+S.played+'</div>'
-    + '<div class="n">'+esc(top.name)+'</div>'
-    + '<div class="t">'+top.wNow+' from '+S.played+' so far</div>'
+  var h = '<div class="potw"><div class="k">Most likely champion &middot; through week '
+    + (S.week != null ? S.week : MAXW) + '</div>'
+    + '<div class="n">'+esc(top.team)+'</div>'
+    + '<div class="t">'+esc(top.rec || "")+'</div>'
     + '<div class="stats">'
-    +   '<div class="stat"><b>'+Math.round(top.ch*100)+'%</b><span>win the title</span></div>'
-    +   '<div class="stat"><b>'+Math.round(top.po*100)+'%</b><span>make the playoffs</span></div>'
-    +   '<div class="stat"><b>'+n1(top.w)+'</b><span>projected wins</span></div>'
-    +   '<div class="stat"><b>'+Math.round(top.pf)+'</b><span>projected points</span></div>'
+    +   '<div class="stat"><b>'+Math.round((top.ch||0)*100)+'%</b><span>win the title</span></div>'
+    +   '<div class="stat"><b>'+Math.round((top.po||0)*100)+'%</b><span>make the playoffs</span></div>'
+    +   '<div class="stat"><b>'+n1(top.w||0)+'</b><span>projected wins</span></div>'
+    +   '<div class="stat"><b>'+Math.round(top.pf||0)+'</b><span>projected points</span></div>'
     + '</div><p class="s">'
-    + 'Every remaining fixture played '+S.n.toLocaleString()+' times, from what each team has actually '
-    + 'been scoring, and the survivors run through the bracket. '
+    + 'Every remaining fixture played '+(S.n||0).toLocaleString()+' times, from what each roster is '
+    + 'projected to score, and the survivors run through the bracket. '
     + (bubble.length
         ? bubble.length+' side'+(bubble.length===1?' is':'s are')+' somewhere between in and out: '
-          + bubble.map(function(r){ return esc(r.name); }).join(", ") + '.'
-        : 'Nobody is genuinely on the bubble yet, which will not last.')
+          + bubble.map(function(r){ return esc(r.team); }).join(", ") + '.'
+        : 'Nobody is genuinely on the bubble, which will not last.')
     + '</p></div>';
+
+  if (stale){
+    h += '<p class="note"><b>This table was filed through week '+S.week+'</b>, and the paper is now '
+       + 'showing week '+MAXW+'. The games since are not in it.</p>';
+  }
 
   h += tableHTML(rows, [
     {h:"#", l:true, f:function(r,i){ return '<td class="l rk">'+(i+1)+'</td>'; }},
-    {h:"Team", l:true, f:function(r){ return '<td class="l nm">'+esc(r.name)+'</td>'; }},
-    {h:"Now", f:function(r){ return '<td class="tm">'+r.wNow+'-'+(S.played - r.wNow)+'</td>'; }},
-    {h:"Proj wins", f:function(r){ return '<td><b>'+n1(r.w)+'</b></td>'; }},
-    {h:"Proj pts", f:function(r){ return '<td class="tm">'+Math.round(r.pf)+'</td>'; }},
-    {h:"1st seed", f:function(r){ return '<td>'+pc(r.s1 || 0)+'</td>'; }},
+    {h:"Team", l:true, f:function(r){ return '<td class="l nm">'+esc(r.team)+'</td>'; }},
+    {h:"Now", f:function(r){ return '<td class="tm">'+esc(r.rec || "&middot;")+'</td>'; }},
+    {h:"Proj wins", f:function(r){ return '<td><b>'+n1(r.w||0)+'</b></td>'; }},
+    {h:"Proj pts", f:function(r){ return '<td class="tm">'+Math.round(r.pf||0)+'</td>'; }},
+    {h:"1st seed", f:function(r){ return '<td>'+pc(r.s1)+'</td>'; }},
     {h:"Playoffs", f:function(r){ return '<td class="'+(r.po>=0.5?"up":(r.po<0.15?"dn":"tm"))+'">'
       + pc(r.po)+'</td>'; }},
-    {h:"Title", f:function(r){ return '<td class="'+(r.ch>=0.15?"up":"tm")+'">'+pc(r.ch)+'</td>'; }}
+    {h:"Title", f:function(r){ return '<td class="'+(r.ch>=0.15?"up":"tm")+'">'+pc(r.ch)+'</td>'; }},
+    {h:"Consolation", f:function(r){ return '<td class="tm">'+pc(r.lb)+'</td>'; }}
   ], "tight");
 
   h += '<p class="note">Ordered by projected wins, which is the table as it is most likely to finish, '
     + 'not as it stands. <b>Now</b> is the real record. Everything else is the average of '
-    + S.n.toLocaleString()+' simulated seasons: every fixture still to come is played out by drawing each '
-    + 'team a score from its own scoring so far, pulled towards the league average until it has enough '
-    + 'games behind it to be believed, with the spread taken from how much the league actually varies '
-    + 'week to week. The survivors are seeded and the bracket is run to a champion.</p>'
+    + (S.n||0).toLocaleString()+' simulated seasons: the weeks already played are taken as fact and '
+    + 'every fixture still to come is played out from what each roster projects to score, with the '
+    + 'spread and the week-to-week wobble the league actually shows. The survivors are seeded and the '
+    + 'bracket is run to a champion. <b>Consolation</b> is the bracket the six who miss the playoffs '
+    + 'play.</p>'
     + '<p class="note">Two things it cannot know: who gets hurt, and what anybody does about it. '
-    + 'A trade, a waiver claim or a torn hamstring will move these more than another week of results '
+    + 'A trade, a waiver claim or a torn hamstring will move these further than another week of results '
     + 'will. They are the state of the argument, not a forecast anybody should bet on.</p>';
   return h;
 }
@@ -4315,6 +4330,42 @@ function teamScores(){
   }
   return by;
 }
+/* What a roster is worth in a week: the best legal lineup it could field,
+   priced at what those players are projected for. A player's projection is
+   averaged over the weeks on file, skipping the zeroes, so a bye does not read
+   as a man who cannot play. This is the prior the season projection leans on
+   while a team's own scoring is still one or two games of evidence. */
+function rosterMean(rid){
+  var r = (ROSTERS || []).filter(function(x){ return x.roster_id === rid; })[0];
+  if (!r || !(r.players || []).length) return null;
+  var projOf = function(pid){
+    var got = [];
+    for (var w = 1; w <= MAXW; w++){
+      var v = (WPROJ[w] || {})[pid];
+      if (v > 0) got.push(v);
+    }
+    if (got.length) return got.reduce(function(a, b){ return a + b; }, 0) / got.length;
+    return PROJ[pid] || 0;
+  };
+  var slots = (RPOS || []).filter(function(x){ return x !== "BN" && x !== "IR" && x !== "TAXI"; });
+  if (!slots.length) return null;
+  var pool = (r.players || []).map(function(pid){
+    return {pid: pid, pos: (PLAYERS[pid] || {}).position || "", pts: projOf(pid)};
+  }).filter(function(x){ return x.pos; });
+  /* tightest slot first, same greedy the bench regret uses */
+  var order = slots.slice().sort(function(a, b){
+    var n = function(sl){ return pool.filter(function(x){ return slotOk(sl, x.pos); }).length; };
+    return n(a) - n(b);
+  });
+  var used = {}, tot = 0, filled = 0;
+  order.forEach(function(sl){
+    var c = pool.filter(function(x){ return !used[x.pid] && slotOk(sl, x.pos); })
+                .sort(function(a, b){ return b.pts - a.pts; })[0];
+    if (c){ used[c.pid] = 1; tot += c.pts; filled++; }
+  });
+  return filled ? tot : null;
+}
+
 function simSeason(){
   if (SIMS) return SIMS;
   var rids = (ROSTERS||[]).map(function(r){ return r.roster_id; });
@@ -4327,14 +4378,27 @@ function simSeason(){
   var lgSd = all.length > 2 ? Math.sqrt(all.reduce(function(a,b){ return a+(b-lgMean)*(b-lgMean); },0)/all.length)
                             : lgMean*0.22;
   if (!(lgSd > 1)) lgSd = Math.max(8, lgMean*0.22);
-  /* four games is not a season, so a team's own mean is pulled towards the
-     league's until it has earned the right to be believed */
+  /* Four games is not a season, so a team's own scoring is pulled towards a
+     prior until it has earned the right to be believed. The question is which
+     prior, and the first version of this got it wrong: it pulled towards the
+     LEAGUE AVERAGE, which says every roster is the same until proved otherwise.
+     After one week that made the projection almost entirely a ranking of who
+     happened to score most last Sunday, and it put the best roster in the
+     league ninth. The war room does not make that mistake, and the two papers
+     then told the league opposite things about the same team.
+
+     The prior is now the team's own roster: its best legal lineup, priced at
+     what those players are projected for. That is what a manager actually
+     holds, and it is the thing that is true in September when nothing else is.
+     Its own scoring earns weight from there. */
   var SHRINK = 6;
   var mean = {}, wins0 = {}, pf0 = {};
   rids.forEach(function(t){
     var v = sc[t] || [], n = v.length;
     var m = n ? v.reduce(function(a,b){ return a+b; },0)/n : lgMean;
-    mean[t] = (m*n + lgMean*SHRINK) / (n + SHRINK);
+    var prior = rosterMean(t);
+    if (prior == null || !(prior > 0)) prior = lgMean;
+    mean[t] = (m*n + prior*SHRINK) / (n + SHRINK);
     wins0[t] = 0; pf0[t] = 0;
   });
   /* the record so far, from the results themselves */
