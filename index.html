@@ -1463,11 +1463,59 @@ function awardLede(rank){
   return '<h2 class="awardhead">'+esc(head)+'</h2><p class="s wide">'+s+'</p>';
 }
 
+/* The running tally, which used to be its own tab and was a second answer to a
+   question the award had already answered. It belongs under the verdict, where
+   the difference between the two is visible instead of confusing. */
+function mvpTallyHTML(){
+  var rows = Object.keys(SEASON).map(function(k){ return SEASON[k]; })
+    .sort(function(a,b){ return b.mvp - a.mvp; });
+  if (!rows.length) return "";
+  var best = {};
+  rows.forEach(function(r){ if (!best[r.rid] || r.mvp > best[r.rid].mvp) best[r.rid] = r; });
+  var leaders = Object.keys(best).map(function(k){ return best[k]; })
+    .sort(function(a,b){ return b.mvp - a.mvp; });
+
+  return '<h3>The running total</h3>'
+    + '<p class="note">The ranking above is nine measures weighed against each other. This is the plain '
+    + 'tally underneath it: every week\'s points above the bar added up, multiplied where a man won a '
+    + 'game his team would otherwise have lost. No weights, no z-scores, no judgement. Where the two '
+    + 'disagree, the ranking above is saying that volume is not the same as value.</p>'
+    + barMixControl()
+    + tableHTML(rows.slice(0, 30), [
+      {h:"#", l:true, f:function(r,i){ return '<td class="l rk">'+(i+1)+'</td>'; }},
+      {h:"Player", l:true, f:function(r){ return '<td class="l nm">'+posChip(r.pos)+esc(r.n)+'</td>'; }},
+      {h:"Team", l:true, f:function(r){ return '<td class="l tm">'+esc(r.team)+'</td>'; }},
+      {h:"Starts", f:function(r){ return '<td class="tm">'+r.starts+'</td>'; }},
+      {h:"Pts", f:function(r){ return '<td>'+n1(r.pts)+'</td>'; }},
+      {h:"Over", f:function(r){ return '<td class="'+(r.ovr>=0?"up":"dn")+'">'+f1(r.ovr)+'</td>'; }},
+      {h:"Clutch", f:function(r){ return '<td>'+n1(r.clutch)+'</td>'; }},
+      {h:"Swung", f:function(r){ return '<td>'+(r.swung||"&middot;")+'</td>'; }},
+      {h:"MVP", f:function(r){ return '<td><b>'+Math.round(r.mvp)+'</b></td>'; }}
+    ], "tight")
+    + '<h3>Each team&rsquo;s own MVP</h3>'
+    + '<p class="note">Who every manager has to thank so far. '
+    + (LEAGUE ? 'One name per team: the player his season would be unrecognisable without.'
+             : PRIV.col) + '</p>'
+    + tableHTML(leaders, [
+      {h:"Team", l:true, f:function(r){ return '<td class="l nm">'+esc(r.team)+'</td>'; }},
+      {h:"Player", l:true, f:function(r){ return '<td class="l">'+posChip(r.pos)+esc(r.n)+'</td>'; }},
+      {h:"Acquired", l:true, f:function(r){ return '<td class="l tm">'+esc(r.detail)+'</td>'; }},
+      {h:"Starts", f:function(r){ return '<td class="tm">'+r.starts+'</td>'; }},
+      {h:"Swung", f:function(r){ return '<td>'+(r.swung||"&middot;")+'</td>'; }},
+      {h:"Above cost", f:function(r){ return '<td class="'+(r.vac>=0?"up":"dn")+'">'+f1(r.vac)+'</td>'; }},
+      {h:"MVP", f:function(r){ return '<td><b>'+Math.round(r.mvp)+'</b></td>'; }}
+    ], "tight");
+}
+
 function awardView(){
   if (!WEIGHTS) WEIGHTS = JSON.parse(JSON.stringify(PRESETS[PRESET]));
   var pool = buildScores();
-  if (!pool.length) return '<p class="empty">Nobody has enough starts yet. The award needs at least '
-    + MIN_STARTS + '.</p>';
+  /* The weighted award needs a few starts before it means anything, but the
+     running total means something from the first Sunday, and it lives here now.
+     So an early season shows the tally rather than an empty tab. */
+  if (!pool.length) return '<p class="s">The award proper needs at least '+MIN_STARTS+' starts behind a '
+    + 'player before it will rank him, so it is not saying anything yet. The running total below is '
+    + 'counting from the first week.</p>' + mvpTallyHTML();
   pool.forEach(function(s){ s.idx = scoreOf(s, WEIGHTS); });
   var rank = pool.slice().sort(function(a,b){ return b.idx - a.idx; });
 
@@ -1543,6 +1591,7 @@ function awardView(){
   h += '<h3>What each column is</h3><ul>'
     + COMPS.map(function(c){ return '<li><strong>'+esc(c.n)+'.</strong> '+esc(c.d)+'</li>'; }).join("")
     + '</ul>';
+  h += mvpTallyHTML();
   return h;
 }
 
@@ -1816,43 +1865,68 @@ function weekView(){
   return h;
 }
 
+/* ---- the season race ---------------------------------------------------
+   This tab used to be a second ranking of the same players the MVP award
+   ranks, which meant the paper argued with itself and neither name said which
+   was which. The cumulative MVP total has moved to the award, where the raw
+   tally and the considered verdict sit together. What is here now is the thing
+   a tab called the season race should hold and the league had never been
+   shown: where this is all going. */
 function seasonView(){
-  var rows = Object.keys(SEASON).map(function(k){ return SEASON[k]; })
-    .sort(function(a,b){ return b.mvp - a.mvp; });
-  if (!rows.length) return '<p class="empty">Nothing scored yet.</p>';
-  var best = {};
-  rows.forEach(function(r){ if (!best[r.rid] || r.mvp > best[r.rid].mvp) best[r.rid] = r; });
-  var leaders = Object.keys(best).map(function(k){ return best[k]; })
-    .sort(function(a,b){ return b.mvp - a.mvp; });
+  var S = simSeason();
+  if (!S || !S.rows || !S.rows.length)
+    return '<p class="empty">Not enough of the season has been played to project it yet.</p>';
+  var rows = S.rows.slice().sort(function(a, b){
+    return (b.w - a.w) || (b.pf - a.pf);
+  });
+  var pc = function(v){
+    if (v >= 0.995) return "<b>&gt;99%</b>";
+    if (v > 0 && v < 0.005) return '<span class="tm">&lt;1%</span>';
+    return Math.round(v*100)+"%";
+  };
+  var top = rows.slice().sort(function(a,b){ return b.ch - a.ch; })[0];
+  var fav = rows.slice().sort(function(a,b){ return b.po - a.po; });
+  var bubble = fav.filter(function(r){ return r.po > 0.3 && r.po < 0.7; });
 
-  return '<p class="note">Running total of weekly MVP points: points above the bar, doubled in wins '
-    + 'your team would have lost without you. The bar is a mix of what he was projected for that week '
-    + 'and what the chances he actually got were worth, and the mix is yours to move.</p>'
-    + barMixControl()
-    + tableHTML(rows.slice(0, 30), [
+  var h = '<div class="potw"><div class="k">Most likely champion &middot; through week '+S.played+'</div>'
+    + '<div class="n">'+esc(top.name)+'</div>'
+    + '<div class="t">'+top.wNow+' from '+S.played+' so far</div>'
+    + '<div class="stats">'
+    +   '<div class="stat"><b>'+Math.round(top.ch*100)+'%</b><span>win the title</span></div>'
+    +   '<div class="stat"><b>'+Math.round(top.po*100)+'%</b><span>make the playoffs</span></div>'
+    +   '<div class="stat"><b>'+n1(top.w)+'</b><span>projected wins</span></div>'
+    +   '<div class="stat"><b>'+Math.round(top.pf)+'</b><span>projected points</span></div>'
+    + '</div><p class="s">'
+    + 'Every remaining fixture played '+S.n.toLocaleString()+' times, from what each team has actually '
+    + 'been scoring, and the survivors run through the bracket. '
+    + (bubble.length
+        ? bubble.length+' side'+(bubble.length===1?' is':'s are')+' somewhere between in and out: '
+          + bubble.map(function(r){ return esc(r.name); }).join(", ") + '.'
+        : 'Nobody is genuinely on the bubble yet, which will not last.')
+    + '</p></div>';
+
+  h += tableHTML(rows, [
     {h:"#", l:true, f:function(r,i){ return '<td class="l rk">'+(i+1)+'</td>'; }},
-    {h:"Player", l:true, f:function(r){ return '<td class="l nm">'+posChip(r.pos)+esc(r.n)+'</td>'; }},
-    {h:"Team", l:true, f:function(r){ return '<td class="l tm">'+esc(r.team)+'</td>'; }},
-    {h:"Starts", f:function(r){ return '<td class="tm">'+r.starts+'</td>'; }},
-    {h:"Pts", f:function(r){ return '<td>'+n1(r.pts)+'</td>'; }},
-    {h:"Over", f:function(r){ return '<td class="'+(r.ovr>=0?"up":"dn")+'">'+f1(r.ovr)+'</td>'; }},
-    {h:"Clutch", f:function(r){ return '<td>'+n1(r.clutch)+'</td>'; }},
-    {h:"Swung", f:function(r){ return '<td>'+(r.swung||"&middot;")+'</td>'; }},
-    {h:"MVP", f:function(r){ return '<td><b>'+Math.round(r.mvp)+'</b></td>'; }}
-  ])
-  + '<h3>Each team&rsquo;s own MVP</h3>'
-  + '<p class="note">Who every manager has to thank so far. '
-  + (LEAGUE ? 'One name per team: the player his season would be unrecognisable without.'
-           : PRIV.col) + '</p>'
-  + tableHTML(leaders, [
-    {h:"Team", l:true, f:function(r){ return '<td class="l nm">'+esc(r.team)+'</td>'; }},
-    {h:"Player", l:true, f:function(r){ return '<td class="l">'+posChip(r.pos)+esc(r.n)+'</td>'; }},
-    {h:"Acquired", l:true, f:function(r){ return '<td class="l tm">'+esc(r.detail)+'</td>'; }},
-    {h:"Starts", f:function(r){ return '<td class="tm">'+r.starts+'</td>'; }},
-    {h:"Swung", f:function(r){ return '<td>'+(r.swung||"&middot;")+'</td>'; }},
-    {h:"Above cost", f:function(r){ return '<td class="'+(r.vac>=0?"up":"dn")+'">'+f1(r.vac)+'</td>'; }},
-    {h:"MVP", f:function(r){ return '<td><b>'+Math.round(r.mvp)+'</b></td>'; }}
-  ]);
+    {h:"Team", l:true, f:function(r){ return '<td class="l nm">'+esc(r.name)+'</td>'; }},
+    {h:"Now", f:function(r){ return '<td class="tm">'+r.wNow+'-'+(S.played - r.wNow)+'</td>'; }},
+    {h:"Proj wins", f:function(r){ return '<td><b>'+n1(r.w)+'</b></td>'; }},
+    {h:"Proj pts", f:function(r){ return '<td class="tm">'+Math.round(r.pf)+'</td>'; }},
+    {h:"1st seed", f:function(r){ return '<td>'+pc(r.s1 || 0)+'</td>'; }},
+    {h:"Playoffs", f:function(r){ return '<td class="'+(r.po>=0.5?"up":(r.po<0.15?"dn":"tm"))+'">'
+      + pc(r.po)+'</td>'; }},
+    {h:"Title", f:function(r){ return '<td class="'+(r.ch>=0.15?"up":"tm")+'">'+pc(r.ch)+'</td>'; }}
+  ], "tight");
+
+  h += '<p class="note">Ordered by projected wins, which is the table as it is most likely to finish, '
+    + 'not as it stands. <b>Now</b> is the real record. Everything else is the average of '
+    + S.n.toLocaleString()+' simulated seasons: every fixture still to come is played out by drawing each '
+    + 'team a score from its own scoring so far, pulled towards the league average until it has enough '
+    + 'games behind it to be believed, with the spread taken from how much the league actually varies '
+    + 'week to week. The survivors are seeded and the bracket is run to a champion.</p>'
+    + '<p class="note">Two things it cannot know: who gets hurt, and what anybody does about it. '
+    + 'A trade, a waiver claim or a torn hamstring will move these more than another week of results '
+    + 'will. They are the state of the argument, not a forecast anybody should bet on.</p>';
+  return h;
 }
 
 function clutchView(){
@@ -1988,6 +2062,17 @@ function methodView(){
   + '<p>Two prices are judgement calls rather than measurements, so they are named dials in the '
   + 'source rather than magic numbers: a full-budget waiver claim is treated as worth 1,500, and a '
   + 'free agent 30.</p>' 
+  + '<h3>The trail under each card</h3>'
+  + '<p>It is reconstructed rather than recorded. Nobody sat and logged a probability every minute of the '
+  + 'weekend, and for the weeks before this paper existed nobody could have. What there is instead is the '
+  + 'kick-off time of every NFL game and the timestamp of every scoring play, so each man\'s points are '
+  + 'spread across his own sixty minutes and the probability is recomputed across the whole weekend from '
+  + 'the ground up.</p>'
+  + '<p>Two consequences worth knowing. A touchdown reads as a slope rather than a step, because the points '
+  + 'are distributed across the drive rather than dropped at the moment they were scored. And the axis is '
+  + 'not linear in time: the stretches when a game involving one of these two teams was actually being '
+  + 'played get the width, and the hours between them are squeezed to a sliver with a break drawn in, '
+  + 'because two thirds of a weekend is Friday.</p>'
   + '<h3>Clutch</h3>'
   + '<p>Only counts in wins, and <strong>a win is worth one clutch point between them, not one each</strong>. '
   + 'That single point is divided among the men who beat their bar, in proportion to how far each beat it '
@@ -2960,15 +3045,12 @@ function mateNote(pid){
   return ', and he did it with his quarterback '+esc(qb.name)+' on the report ('
     + esc(hurtWord(qb))+')';
 }
-/* ESPN's own line on the real game, credited, and only once per NFL game per
-   render however many managers had a piece of it */
-function realGameNote(pid){
-  var g = nflGameOf(pid);
-  if (!g || !g.done || (!g.title && !g.recap)) return "";
-  var txt = g.recap || g.title;
-  return once("recap:"+g.id, ' <span class="src">'+esc(g.name)+', per ESPN: '
-    + esc(txt.replace(/\s+/g," ").slice(0, 170))+'</span>');
-}
+/* This used to print the news feed's own sentence about the real NFL game,
+   credited to it. The quote is gone, so the credit went with it: the paper
+   writes its own lines or it says nothing, and a borrowed sentence with a
+   byline on it was neither. The feed is still read for kick-off times, scoring
+   timestamps and injury designations, which are facts rather than prose. */
+function realGameNote(){ return ""; }
 function played(e){
   return lineupOf(e).filter(function(x){ return !x.empty && x.inBox; })
     .map(function(x){ x.diff = x.pts - x.pexp; return x; });
@@ -4122,25 +4204,25 @@ function reportView(){
   });
   h += '</div>';
 
-  h += '<p class="note">'+(NEWS.src === "live"
-      ? 'Real-world context, injuries and return dates come from ESPN\'s public feed, read when this page '
-        + 'loaded. '+NEWS.games.length+' NFL games and '+Object.keys(NEWS.byPlayer).length
-        + ' injury entries.'
-      : (NEWS.src === "snapshot"
-         ? 'The live news feed could not be read, so the baked copy is being used and may be behind.'
-         : 'No news feed. The browser refused the ESPN call, which is what happens when the page is opened '
-           + 'straight off the disk: run it through run-gazette.cmd instead and the context comes back.'))
-    + '</p>';
+  /* A newspaper does not print a note about its own printing press. When the
+     feed is working there is nothing to say, so nothing is said; the two lines
+     below are the cases where the reader is looking at something less than the
+     real thing and deserves to be told. How the trail is built is on the How it
+     is scored tab, where somebody who wants it can go and find it. */
+  if (NEWS.src === "snapshot"){
+    h += '<p class="note">The live news feed could not be read, so a saved copy is being used and the '
+       + 'injury notes may be behind.</p>';
+  } else if (NEWS.src !== "live" && !LEAGUE){
+    h += '<p class="note">No news feed. The browser refused the call, which is what happens when this page '
+       + 'is opened straight off the disk: run it through run-gazette.cmd instead and the context comes '
+       + 'back.</p>';
+  }
 
-  h += '<p class="note">'+(live
-      ? 'Win probability is points already banked plus the league projection for every starter whose game '
-        + 'is not over, scaled by how much of that game is left, with the spread widening by about nine '
-        + 'points for each whole game still to play. '
-      : '')
-    + 'The trail under each card is reconstructed rather than recorded: ESPN supplies every kick-off time, '
-    + 'each man\'s points are spread across his own sixty minutes, and the probability is recomputed across '
-    + 'the whole weekend. A touchdown therefore reads as a slope rather than a step, but the graph exists '
-    + 'for every week, including the ones nobody sat and watched.</p>';
+  if (live){
+    h += '<p class="note">Win probability is points already banked plus the league projection for every '
+       + 'starter whose game is not over, scaled by how much of that game is left, with the spread widening '
+       + 'by about nine points for each whole game still to play.</p>';
+  }
 
   /* the written bits */
   var rows = (WEEKS[w-1] || []).slice().sort(function(a,b){ return b.mvp - a.mvp; });
@@ -4274,8 +4356,8 @@ function simSeason(){
     });
     if (any) played = w2;
   }
-  var po = {}, ch = {}, sw = {}, spf = {};
-  rids.forEach(function(t){ po[t]=0; ch[t]=0; sw[t]=0; spf[t]=0; });
+  var po = {}, ch = {}, sw = {}, spf = {}, s1 = {};
+  rids.forEach(function(t){ po[t]=0; ch[t]=0; sw[t]=0; spf[t]=0; s1[t]=0; });
   var teams = Math.min(PO.teams || 6, rids.length);
   var draw = function(t){ return mean[t] + lgSd * gauss(); };
 
@@ -4294,6 +4376,7 @@ function simSeason(){
     var order = rids.slice().sort(function(a,b){ return (W[b]-W[a]) || (PF[b]-PF[a]); });
     var pl = order.slice(0, teams);
     pl.forEach(function(t){ po[t]++; });
+    if (pl.length) s1[pl[0]]++;              /* the one seed, and the bye that comes with it */
     /* the bracket, as the league plays it: top two on a bye when six qualify */
     var play = function(a,b){ return draw(a) >= draw(b) ? a : b; };
     var champ;
@@ -4310,7 +4393,7 @@ function simSeason(){
   SIMS = {n: SIMN, played: played, rows: rids.map(function(t){
     return {rid: t, name: TEAM[t] || ("Roster "+t),
             w: sw[t]/SIMN, pf: spf[t]/SIMN,
-            po: po[t]/SIMN, ch: ch[t]/SIMN,
+            po: po[t]/SIMN, ch: ch[t]/SIMN, s1: s1[t]/SIMN,
             wNow: wins0[t], pfNow: pf0[t]};
   }).sort(function(a,b){ return b.ch - a.ch; })};
   return SIMS;
